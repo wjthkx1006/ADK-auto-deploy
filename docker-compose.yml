@@ -1,9 +1,0 @@
-version: '3.8'
-
-services:
-  admin-dashboard:
-    build: .
-    container_name: admin-dashboard
-    ports:
-      - "8080:80"
-    restart: unless-stopped

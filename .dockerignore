@@ -3,3 +3,7 @@ dist
 .git
 .gitignore
 *.md
+**/__pycache__
+**/*.pyc
+**/.adk
+auto_deploy_too/.env

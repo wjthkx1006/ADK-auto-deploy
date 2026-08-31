@@ -1,4 +1,4 @@
-﻿name: 一键创建服务器并部署（Terraform → 镜像 → ECS）
+name: 一键创建服务器并部署（Terraform → 镜像 → ECS）
 
 on:
   push:
@@ -14,8 +14,24 @@ env:
   REGION: "cn-hangzhou"
   REGISTRY: "crpi-2xt8naw5x975swse.cn-hangzhou.personal.cr.aliyuncs.com"
   NAMESPACE: "wjthkx1006"
-  IMAGE_NAME: "test1-app"
-  CONTAINER_NAME: "test1-app"
+  IMAGE_NAME: "auto-deploy-agent"
+  CONTAINER_NAME: "auto-deploy-agent"
+  APP_PORT: "8000"
+  MODEL_NAME: "deepseek/deepseek-v4-flash"
+  DEEPSEEK_BASE_URL: "https://api.deepseek.com"
+  DEFAULT_REGION: "cn-hangzhou"
+  DEFAULT_KEY_PAIR_NAME: "adk_key"
+  DEFAULT_VPC_NAME: "adk-vpc"
+  DEFAULT_VSWITCH_NAME: "adk-vswitch"
+  DEFAULT_SECURITY_GROUP_NAME: "adk-sg"
+  DEFAULT_SYSTEM_DISK_SIZE: "40"
+  DEFAULT_INTERNET_BANDWIDTH_OUT: "5"
+  DEFAULT_INSTANCE_AMOUNT: "1"
+  DEFAULT_SSH_USERNAME: "root"
+  SSH_PORT: "22"
+  LOG_LEVEL: "INFO"
+  APP_NAME: "auto-deploy-agent"
+  APP_ENV: "production"
   TF_STATE_BUCKET: "devops-tfstate-1612262844714561"
 
 jobs:
@@ -103,7 +119,28 @@ jobs:
           docker pull {{FULL_IMAGE}}
           docker stop {{CONTAINER_NAME}} || true
           docker rm {{CONTAINER_NAME}} || true
-          docker run -d --name {{CONTAINER_NAME}} -p 80:80 {{FULL_IMAGE}}
+          docker run -d --name {{CONTAINER_NAME}} \
+            -p 80:{{APP_PORT}} \
+            -e MODEL_NAME='{{MODEL_NAME}}' \
+            -e DEEPSEEK_API_KEY='{{DEEPSEEK_API_KEY}}' \
+            -e DEEPSEEK_BASE_URL='{{DEEPSEEK_BASE_URL}}' \
+            -e ALIBABA_CLOUD_ACCESS_KEY_ID='{{ALIYUN_AK_ID}}' \
+            -e ALIBABA_CLOUD_ACCESS_KEY_SECRET='{{ALIYUN_AK_SECRET}}' \
+            -e DEFAULT_REGION='{{DEFAULT_REGION}}' \
+            -e DEFAULT_KEY_PAIR_NAME='{{DEFAULT_KEY_PAIR_NAME}}' \
+            -e DEFAULT_VPC_NAME='{{DEFAULT_VPC_NAME}}' \
+            -e DEFAULT_VSWITCH_NAME='{{DEFAULT_VSWITCH_NAME}}' \
+            -e DEFAULT_SECURITY_GROUP_NAME='{{DEFAULT_SECURITY_GROUP_NAME}}' \
+            -e DEFAULT_SYSTEM_DISK_SIZE='{{DEFAULT_SYSTEM_DISK_SIZE}}' \
+            -e DEFAULT_INTERNET_BANDWIDTH_OUT='{{DEFAULT_INTERNET_BANDWIDTH_OUT}}' \
+            -e DEFAULT_INSTANCE_AMOUNT='{{DEFAULT_INSTANCE_AMOUNT}}' \
+            -e SSH_PRIVATE_KEY='{{SSH_PRIVATE_KEY}}' \
+            -e DEFAULT_SSH_USERNAME='{{DEFAULT_SSH_USERNAME}}' \
+            -e SSH_PORT='{{SSH_PORT}}' \
+            -e LOG_LEVEL='{{LOG_LEVEL}}' \
+            -e APP_NAME='{{APP_NAME}}' \
+            -e APP_ENV='{{APP_ENV}}' \
+            {{FULL_IMAGE}}
           SCRIPT
           )
           ENCODED_CMD=$(printf '%s' "$DEPLOY_CMD" | base64 -w 0)
@@ -113,7 +150,27 @@ jobs:
             --arg reg "$REGISTRY" \
             --arg img "$FULL_IMAGE" \
             --arg con "$CONTAINER_NAME" \
-            '{ACR_USERNAME:$u, ACR_PASSWORD:$p, REGISTRY:$reg, FULL_IMAGE:$img, CONTAINER_NAME:$con}')
+            --arg appPort "$APP_PORT" \
+            --arg modelName "$MODEL_NAME" \
+            --arg deepseekApiKey "${{ secrets.DEEPSEEK_API_KEY }}" \
+            --arg deepseekBaseUrl "$DEEPSEEK_BASE_URL" \
+            --arg aliyunAkId "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}" \
+            --arg aliyunAkSecret "${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}" \
+            --arg defaultRegion "$DEFAULT_REGION" \
+            --arg defaultKeyPairName "$DEFAULT_KEY_PAIR_NAME" \
+            --arg defaultVpcName "$DEFAULT_VPC_NAME" \
+            --arg defaultVswitchName "$DEFAULT_VSWITCH_NAME" \
+            --arg defaultSecurityGroupName "$DEFAULT_SECURITY_GROUP_NAME" \
+            --arg defaultSystemDiskSize "$DEFAULT_SYSTEM_DISK_SIZE" \
+            --arg defaultInternetBandwidthOut "$DEFAULT_INTERNET_BANDWIDTH_OUT" \
+            --arg defaultInstanceAmount "$DEFAULT_INSTANCE_AMOUNT" \
+            --arg sshPrivateKey "${{ secrets.SSH_PRIVATE_KEY }}" \
+            --arg defaultSshUsername "$DEFAULT_SSH_USERNAME" \
+            --arg sshPort "$SSH_PORT" \
+            --arg logLevel "$LOG_LEVEL" \
+            --arg appName "$APP_NAME" \
+            --arg appEnv "$APP_ENV" \
+            '{ACR_USERNAME:$u, ACR_PASSWORD:$p, REGISTRY:$reg, FULL_IMAGE:$img, CONTAINER_NAME:$con, APP_PORT:$appPort, MODEL_NAME:$modelName, DEEPSEEK_API_KEY:$deepseekApiKey, DEEPSEEK_BASE_URL:$deepseekBaseUrl, ALIYUN_AK_ID:$aliyunAkId, ALIYUN_AK_SECRET:$aliyunAkSecret, DEFAULT_REGION:$defaultRegion, DEFAULT_KEY_PAIR_NAME:$defaultKeyPairName, DEFAULT_VPC_NAME:$defaultVpcName, DEFAULT_VSWITCH_NAME:$defaultVswitchName, DEFAULT_SECURITY_GROUP_NAME:$defaultSecurityGroupName, DEFAULT_SYSTEM_DISK_SIZE:$defaultSystemDiskSize, DEFAULT_INTERNET_BANDWIDTH_OUT:$defaultInternetBandwidthOut, DEFAULT_INSTANCE_AMOUNT:$defaultInstanceAmount, SSH_PRIVATE_KEY:$sshPrivateKey, DEFAULT_SSH_USERNAME:$defaultSshUsername, SSH_PORT:$sshPort, LOG_LEVEL:$logLevel, APP_NAME:$appName, APP_ENV:$appEnv}')
 
           aliyun ecs RunCommand \
             --RegionId "$REGION" \
@@ -123,9 +180,9 @@ jobs:
             --EnableParameter true \
             --Parameters "$PARAM_JSON" \
             --CommandContent "$ENCODED_CMD" \
-            --Name deploy-frontend
+            --Name deploy-auto-deploy-agent
 
       - name: 12. 输出访问地址
         run: |
           echo "部署完成！"
-          echo "前端地址: http://${ECS_PUBLIC_IP}"
+          echo "应用地址: http://${ECS_PUBLIC_IP}"
