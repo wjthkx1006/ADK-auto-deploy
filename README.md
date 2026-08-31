@@ -114,6 +114,28 @@ ACR **个人版不支持 OIDC/STS 临时凭证登录**（官方限制），推�
   MCP 代理调用阿里云 API 用的 AK/SK（需具备 ECS/OSS/VPC 等权限）
 - `SSH_PRIVATE_KEY`（可选）：Agent 执行云助手外的 SSH 操作时使用
 
+> 注意：未配置上述 Secrets 时，镜像虽能部署，但助手无法调用 DeepSeek 模型和阿里云 API，基本不可用。
+
+### 密钥存放与安全
+
+所有密钥只保存在 GitHub Secrets（云端加密），**不会**进入仓库或镜像：
+
+```text
+GitHub Secrets（云端加密存储）
+   ↓ 流水线读取，docker run -e 注入
+ECS 容器进程环境变量（仅内存）
+   ↓ getenv() 读取
+ADK 多 Agent 运行
+```
+
+三层保护：
+
+| 层 | 规则 | 作用 |
+| --- | --- | --- |
+| git | `.gitignore` 排除 `.env` | 密钥不进仓库、不推送 |
+| docker | `.dockerignore` 排除 `auto_deploy_too/.env` | 密钥不进镜像 |
+| 运行 | GitHub Secrets 注入容器环境变量 | 服务器磁盘不落明文文件 |
+
 当前实例（华东 1 杭州，2024-09 后开通的新个人版）使用**独立域名**：
 
 ```text
