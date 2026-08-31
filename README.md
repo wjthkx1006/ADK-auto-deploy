@@ -21,6 +21,50 @@
 └── Dockerfile                  # 构建 ADK 部署助手镜像（端口 8000）
 ```
 
+## ADK 部署助手介绍
+
+这是一个基于 **Google ADK（Agent Development Kit）** 构建的多 Agent 应用，部署后是一个浏览器聊天界面，
+用自然语言就能操作阿里云 ECS / OSS 等资源，全程无需手写 CLI 命令。
+
+### 架构
+
+```text
+用户（浏览器聊天界面）
+   │
+   ▼
+deploy_agent（根路由代理）        ← 判断意图，分发任务
+   ├── ecs_agent                 ← ECS 部署/管理
+   └── oss_agent                 ← OSS 对象存储
+        │
+        ▼  （子代理共用同一套 MCP 工具）
+alibabacloud.mcp-proxy           ← 阿里云官方 MCP 代理（uvx 运行）
+   └── 阿里云 OpenAPI（ECS / VPC / OSS / RAM ...）
+```
+
+### 工作方式
+
+1. 用户在聊天界面输入自然语言，例如「在杭州创建一台 2 核 4G Ubuntu 服务器」
+2. 根路由代理（`deploy_agent`）按意图路由到对应子代理：
+   - ECS / 服务器 / 虚拟机 / 部署 / 安装软件 / 释放实例 → `ecs_agent`
+   - OSS / Bucket / 对象存储 / 上传文件 → `oss_agent`
+   - 其他常规问答直接回复，不路由
+3. 子代理通过 MCP 工具实时查询 / 调用阿里云 API，关键参数先询问用户（最多 3 轮），确认后再执行
+4. 执行完成返回结果（公网 IP、Bucket 地址等）
+
+### 子代理能力
+
+| 子代理 | 主要能力 |
+| --- | --- |
+| ecs_agent | 创建 ECS（自动建 VPC / VSwitch / 安全组并开端口）、查询实例、绑定弹性公网 IP、云助手执行命令 / 安装软件、释放实例（二次确认后执行） |
+| oss_agent | 创建 / 列出 / 删除 Bucket、设置 ACL、查看配置 |
+
+### 技术要点
+
+- **模型**：`deepseek/deepseek-v4-flash`，通过 `DEEPSEEK_API_KEY` 认证
+- **工具**：`alibabacloud.mcp-proxy`（阿里云官方 MCP 代理，由 `uvx` 拉起），用 `ALIBABA_CLOUD_ACCESS_KEY_ID / SECRET` 调用阿里云 OpenAPI
+- **依赖**：`google-adk[a2a,mcp]==2.4.0`，子代理共享同一套 MCP 工具集，由根代理按意图分发
+- **界面**：`adk web` 提供聊天 Web UI，本地调试与生产容器使用同一入口
+
 ## 一键部署流程
 
 推送到 `main` 分支后，GitHub Actions 自动执行：
