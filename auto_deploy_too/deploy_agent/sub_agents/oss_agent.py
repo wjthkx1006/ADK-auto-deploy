@@ -1,6 +1,13 @@
 """OSS sub agent — 阿里云 OSS 对象存储管理。"""
 
 from google.adk.agents.llm_agent import LlmAgent
+from deploy_agent.utils import validate_before_tool, parse_after_tool, handle_error_after_tool
+
+
+def _after_tool(tool, args, tool_context, tool_response):
+    """Chain response parser then error handler."""
+    parse_after_tool(tool, args, tool_context, tool_response)
+    return handle_error_after_tool(tool, args, tool_context, tool_response)
 
 OSS_INSTRUCTION = """
 OSS 存储管理代理，专长阿里云 OSS（对象存储）操作。
@@ -62,4 +69,6 @@ def create_oss_agent(model: str, toolset):
         model=model,
         instruction=OSS_INSTRUCTION,
         tools=[toolset],
+        before_tool_callback=validate_before_tool,
+        after_tool_callback=_after_tool,
     )
