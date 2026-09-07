@@ -1,10 +1,18 @@
 """
-validators.py — Input validation for destructive Alibaba Cloud operations.
+validators.py — Input validation for Alibaba Cloud tool calls.
 
-Used as a before_tool_callback on each sub-agent. Returns a blocking error
-string when a destructive tool is called with a suspicious or malformed
-resource ID, preventing the model from acting on hallucinated identifiers.
-Returns None to allow all other tool calls through unchanged.
+Two layers of protection, both enforced in before_tool_callback:
+
+1. Resource ID format check — destructive tools (delete/release) must carry a
+   well-formed resource ID. Blocks the model from acting on hallucinated IDs.
+
+2. Security policy check — hard rules that must hold regardless of what the
+   model decides based on instruction prompts:
+   - Database ports (3306 / 6379 / 27017 / 5432 / 1433) must not be opened
+     to 0.0.0.0/0 (the public internet).
+   - All security group rules must specify a valid CIDR block.
+
+Returns a dict with an 'error' key to block execution, or None to proceed.
 """
 
 from __future__ import annotations
@@ -41,26 +49,49 @@ _PATTERNS: dict[str, re.Pattern] = {
 # resource identifier. All names are lowercase for case-insensitive matching.
 _DESTRUCTIVE_TOOLS: dict[str, list[tuple[str, str]]] = {
     # ECS
-    "deleteinstance":        [("instanceid", "instance_id")],
-    "stopinstance":          [("instanceid", "instance_id")],
-    "releaseinstance":       [("instanceid", "instance_id")],
+    "deleteinstance":            [("instanceid", "instance_id")],
+    "stopinstance":              [("instanceid", "instance_id")],
+    "releaseinstance":           [("instanceid", "instance_id")],
     # Security group
-    "deletesecuritygroup":   [("securitygroupid", "security_group_id")],
-    "revokesecuritygroup":   [("securitygroupid", "security_group_id")],
+    "deletesecuritygroup":       [("securitygroupid", "security_group_id")],
+    "revokesecuritygroup":       [("securitygroupid", "security_group_id")],
     "revokesecuritygroupegress": [("securitygroupid", "security_group_id")],
     # VPC / VSwitch
-    "deletevpc":             [("vpcid", "vpc_id")],
-    "deletevswitch":         [("vswitchid", "vswitch_id")],
+    "deletevpc":                 [("vpcid", "vpc_id")],
+    "deletevswitch":             [("vswitchid", "vswitch_id")],
     # OSS
-    "deletebucket":          [("bucketname", "bucket_name"), ("bucket", "bucket_name")],
+    "deletebucket":              [("bucketname", "bucket_name"), ("bucket", "bucket_name")],
     # DNS
-    "deletedomainrecord":    [("recordid", "record_id")],
-    "setdomainrecordstatus": [("recordid", "record_id")],
+    "deletedomainrecord":        [("recordid", "record_id")],
+    "setdomainrecordstatus":     [("recordid", "record_id")],
     # EIP
-    "releaseelasticaddress": [("allocationid", "allocation_id")],
-    "unassociateeipaddress": [("allocationid", "allocation_id")],
+    "releaseelasticaddress":     [("allocationid", "allocation_id")],
+    "unassociateeipaddress":     [("allocationid", "allocation_id")],
 }
 
+# ---------------------------------------------------------------------------
+# Security policy: database ports that must never be opened to 0.0.0.0/0
+# ---------------------------------------------------------------------------
+
+# Map of port -> service name for clear error messages
+_DB_PORTS: dict[str, str] = {
+    "3306":  "MySQL",
+    "6379":  "Redis",
+    "27017": "MongoDB",
+    "5432":  "PostgreSQL",
+    "1433":  "SQL Server",
+}
+
+# Security group rule tools (ingress)
+_SG_RULE_TOOLS = {"authorizesecuritygroup", "authorizesecuritygroupegress"}
+
+# Valid CIDR pattern — basic sanity check (x.x.x.x/n)
+_CIDR_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _find_arg(args: Dict[str, Any], *candidates: str) -> Optional[str]:
     """Return the first matching argument value (case-insensitive key lookup)."""
@@ -71,26 +102,27 @@ def _find_arg(args: Dict[str, Any], *candidates: str) -> Optional[str]:
     return None
 
 
-def validate_before_tool(
-    tool: BaseTool,
-    args: Dict[str, Any],
-    tool_context: ToolContext,
-) -> Optional[Dict]:
-    """
-    before_tool_callback — validates resource IDs on destructive operations.
+def _extract_start_port(port_range: str) -> Optional[str]:
+    """Extract start port from '3306/3306' or '3306' format."""
+    if "/" in port_range:
+        return port_range.split("/")[0].strip()
+    return port_range.strip()
 
-    Returns a dict with an 'error' key to block execution, or None to proceed.
-    """
-    tool_name_lower = tool.name.lower()
 
+# ---------------------------------------------------------------------------
+# Validation layers
+# ---------------------------------------------------------------------------
+
+def _check_resource_id(tool_name_lower: str, args: Dict[str, Any]) -> Optional[Dict]:
+    """Layer 1: validate resource ID format on destructive operations."""
     checks = _DESTRUCTIVE_TOOLS.get(tool_name_lower)
     if not checks:
-        return None  # not a destructive tool, allow through
+        return None
 
     for arg_name, pattern_key in checks:
         value = _find_arg(args, arg_name)
         if value is None:
-            continue  # arg not present, let the model/API handle the missing param
+            continue
 
         pattern = _PATTERNS[pattern_key]
         if not pattern.match(value):
@@ -102,5 +134,67 @@ def validate_before_tool(
                     "Please verify the resource ID before retrying."
                 )
             }
+
+    return None
+
+
+def _check_security_policy(tool_name_lower: str, args: Dict[str, Any]) -> Optional[Dict]:
+    """Layer 2: enforce hard security rules on security group rule operations."""
+    if tool_name_lower not in _SG_RULE_TOOLS:
+        return None
+
+    # Check CIDR is present and valid
+    cidr = _find_arg(args, "cidrip", "sourcecidrir", "destcidrir", "ipv6cidrip")
+    if cidr is not None and not _CIDR_PATTERN.match(cidr):
+        return {
+            "error": (
+                f"[Security] Blocked: '{cidr}' is not a valid CIDR block. "
+                "Please use a format like 0.0.0.0/0 or 1.2.3.4/32."
+            )
+        }
+
+    # Block database ports open to the public internet
+    port_range = _find_arg(args, "portrange")
+    if port_range and cidr == "0.0.0.0/0":
+        start_port = _extract_start_port(port_range)
+        if start_port in _DB_PORTS:
+            service = _DB_PORTS[start_port]
+            return {
+                "error": (
+                    f"[Security] Blocked: {service} port {start_port} must not be opened "
+                    f"to 0.0.0.0/0 (the entire internet). "
+                    f"Please specify a restricted source IP, e.g. your office IP as 1.2.3.4/32."
+                )
+            }
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Callback entry point
+# ---------------------------------------------------------------------------
+
+def validate_before_tool(
+    tool: BaseTool,
+    args: Dict[str, Any],
+    tool_context: ToolContext,
+) -> Optional[Dict]:
+    """
+    before_tool_callback — two-layer validation before any tool executes.
+
+    Layer 1: resource ID format check on destructive operations.
+    Layer 2: security policy check on security group rule operations.
+
+    Returns a dict with an 'error' key to block execution, or None to proceed.
+    """
+    tool_name_lower = tool.name.lower()
+
+    result = _check_resource_id(tool_name_lower, args)
+    if result:
+        return result
+
+    result = _check_security_policy(tool_name_lower, args)
+    if result:
+        return result
 
     return None  # all checks passed

@@ -1,4 +1,4 @@
-"""Monitor sub agent — 阿里云云监控（免费功能）。"""
+"""Monitor sub agent — 阿里云云监控"""
 
 from google.adk.agents.llm_agent import LlmAgent
 from deploy_agent.utils import validate_before_tool, parse_after_tool, handle_error_after_tool
