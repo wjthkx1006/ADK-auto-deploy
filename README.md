@@ -1,8 +1,19 @@
-# Aliyun DevOps ADK Deploy — 阿里云自动化部署与多 Agent 云资源管理平台手
+# 云基础设施多 Agent 自动化部署平台（NL-IaC）
 
-`git push main` → **GitHub Actions** OIDC 认证 → **Terraform** 创建 VPC / 安全组 / ECS → **cloud-init** 安装 Docker → 构建镜像推送 **ACR** → 云助手拉取镜像启动容器 → `http://<公网IP>`
+用自然语言管理云上基础设施：一句话创建 ECS、开通端口、绑定域名，`git push` 即完成从建机到上线的全流程部署。
 
-`http://<公网IP>` → 自然语言输入 → **deploy_agent** 路由 → `ecs_agent` / `oss_agent` / `dns_agent` / `monitor_agent` → **alibabacloud.mcp-proxy** → 阿里云 OpenAPI
+基于 **Google ADK** 构建多 Agent 架构，通过 **MCP** 协议调用阿里云 OpenAPI，配合 **Terraform** 与 **GitHub Actions** 完成基础设施的创建、部署与销毁。
+
+| 能力 | 说明 |
+| --- | --- |
+| **根路由 Agent** | 理解自然语言意图，分发到对应的专项子 Agent |
+| **4 个专项子 Agent** | ECS / OSS / DNS / 云监控，各自绑定独立工具集 |
+| **工具调用护栏** | `before_tool_callback` 校验销毁类操作的资源 ID；数据库端口禁止对 `0.0.0.0/0` 开放，代码层硬拦截，不可被 prompt 绕过 |
+| **一键部署** | 推送 main 触发 Terraform 建机 + 镜像构建 + 容器启动，并支持一键销毁 |
+
+完整链路：`git push` → GitHub Actions（OIDC 免密）→ Terraform 创建 VPC / 安全组 / ECS → cloud-init 安装 Docker → 构建镜像推送 ACR → 云助手拉取镜像启动容器。
+
+> **关于本仓库**：项目源自某国际多边金融机构云基础设施的自动化需求，此处为**脱敏版本**——不含任何客户数据、内部配置与真实凭据，所有示例均为可本地复现的通用配置。
 
 ---
 
