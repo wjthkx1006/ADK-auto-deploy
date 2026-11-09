@@ -8,3 +8,20 @@ dist/
 # 本地环境变量（含密钥），禁止入库；.env.example 模板除外
 .env
 !.env.example
+
+# Python 缓存与虚拟环境
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志与本地数据
+*.log
+*.db
